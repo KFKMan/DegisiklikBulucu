@@ -1,0 +1,6 @@
+playsound
+webdriver-manager
+selenium
+beautifulsoup4
+plyer
+python-Levenshtein
