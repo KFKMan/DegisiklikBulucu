@@ -35,6 +35,8 @@ except ImportError:
 
 class WebsiteMonitorApp:
     def __init__(self, master):
+        self.alert_active = False  # Değişiklik bildirimi aktif mi?
+        self.alert_interval = 4    # Varsayılan bildirim aralığı (saniye)
         self.master = master
         master.title("Web Sitesi İzleyici")
         master.geometry("600x680")
@@ -68,6 +70,12 @@ class WebsiteMonitorApp:
         self.threshold_entry = tk.Entry(master, width=10)
         self.threshold_entry.insert(0, "5.0")
         self.threshold_entry.pack()
+
+        # Bildirim döngüsü aralığı
+        tk.Label(master, text="Bildirim Tekrar Aralığı (saniye):").pack(pady=5)
+        self.alert_interval_entry = tk.Entry(master, width=10)
+        self.alert_interval_entry.insert(0, "4")
+        self.alert_interval_entry.pack()
         
         # Canlı durum göstergesi
         self.status_label = tk.Label(master, text="Durum: Bekliyor...", font=("Arial", 12), fg="blue")
@@ -76,8 +84,16 @@ class WebsiteMonitorApp:
         self.open_browser_button = tk.Button(master, text="Tarayıcıyı Aç", command=self.open_browser)
         self.open_browser_button.pack(pady=10)
 
+
         self.start_monitor_button = tk.Button(master, text="İzlemeyi Başlat", command=self.start_monitoring, state=tk.DISABLED)
+        # Bildirim sesi test tuşu
+        self.test_sound_button = tk.Button(master, text="Masaüstü Bildirim Sistemini Test Et", command=self.send_notification)
+        self.test_sound_button.pack(pady=5)
         self.start_monitor_button.pack(pady=5)
+
+        # Kontrol Edildi butonu
+        self.ack_button = tk.Button(master, text="Kontrol Edildi", command=self.acknowledge_alert, state=tk.DISABLED)
+        self.ack_button.pack(pady=5)
 
         self.stop_button = tk.Button(master, text="İzlemeyi Durdur", command=self.stop_monitoring, state=tk.DISABLED)
         self.stop_button.pack(pady=5)
@@ -85,6 +101,12 @@ class WebsiteMonitorApp:
         tk.Label(master, text="Durum ve Loglar:").pack(pady=5)
         self.log_area = scrolledtext.ScrolledText(master, width=70, height=20, wrap=tk.WORD)
         self.log_area.pack(pady=10)
+
+    def acknowledge_alert(self):
+        """Kullanıcı değişikliği kontrol etti, bildirim döngüsünü durdur."""
+        self.alert_active = False
+        self.ack_button.config(state=tk.DISABLED)
+        self.log_message("Kullanıcı değişikliği kontrol etti, bildirimler durduruldu.")
 
     def log_message(self, message):
         """GUI'deki log alanına mesaj yazar."""
@@ -108,7 +130,7 @@ class WebsiteMonitorApp:
         elif not os.path.exists(self.sound_file):
             self.log_message(f"Ses dosyası bulunamadı: '{self.sound_file}'")
     
-    def send_notification(self, title, message):
+    def send_notification(self, title="Deneme", message="Bu bir deneme bildirimi"):
         """Masaüstü bildirimi gönderir."""
         if NOTIFICATION_AVAILABLE:
             try:
@@ -171,6 +193,11 @@ class WebsiteMonitorApp:
             # Virgül varsa noktaya çevirerek float'a dönüştürür.
             threshold_str = self.threshold_entry.get().replace(',', '.')
             self.change_threshold = float(threshold_str)
+            # Bildirim döngüsü aralığı
+            try:
+                self.alert_interval = int(self.alert_interval_entry.get())
+            except ValueError:
+                self.alert_interval = 4
         except ValueError:
             messagebox.showerror("Hata", "Lütfen geçerli bir sayı girin (saniye ve eşik için).")
             return
@@ -236,22 +263,17 @@ class WebsiteMonitorApp:
     def monitor_process(self):
         try:
             self.log_message("Sayfa içeriği hazırlanıyor...")
-            WebDriverWait(self.driver, 10).until(
-                EC.presence_of_element_located((By.TAG_NAME, "body"))
-            )
             initial_html = self.get_clean_html(self.driver.page_source)
             
             while self.is_monitoring:
                 self.log_message("Sayfa kontrol ediliyor...")
                 self.update_status_label("Durum: Kontrol Ediliyor...", "blue")
                 self.driver.refresh()
-                
-                WebDriverWait(self.driver, 10).until(
-                    EC.presence_of_element_located((By.TAG_NAME, "body"))
-                )
+
+                time.sleep(self.interval)
 
                 new_html = self.get_clean_html(self.driver.page_source)
-                
+
                 change_detected = False
                 change_percentage = self.compare_html_by_diff(initial_html, new_html)
 
@@ -274,13 +296,17 @@ class WebsiteMonitorApp:
                     pass
 
                 if change_detected:
-                    self.play_alert_sound()
+                    self.alert_active = True
+                    self.ack_button.config(state=tk.NORMAL)
                     self.update_status_label("Durum: DEĞİŞİKLİK TESPİT EDİLDİ!", "red")
+                    # Sonsuz döngü: kullanıcı Kontrol Edildi'ye basana kadar
+                    while self.alert_active and self.is_monitoring:
+                        self.play_alert_sound()
+                        self.send_notification("Sayfa Değişikliği", "İzlenen web sayfasında önemli bir değişiklik tespit edildi. Lütfen kontrol edin ve 'Kontrol Edildi'ye basın.")
+                        time.sleep(self.alert_interval)
                 else:
                     self.log_message(f"Değişim tespit edilmedi. (%{change_percentage:.2f}). Bekleniyor...")
                     self.update_status_label("Durum: İzleniyor...", "green")
-                
-                time.sleep(self.interval)
 
         except Exception as e:
             self.log_message(f"Bir hata oluştu: {e}")
